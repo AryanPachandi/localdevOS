@@ -4,7 +4,7 @@ import { executeTool, type ApprovalHandler } from "../agent/executor.js";
 import type { ModelClient, OnToolActivityCallback, ToolActivityEvent } from "./model.js";
 import type { Workspace } from "../workspace/workspace.js";
 
-const MAX_TOOL_ROUNDS = 8;
+const getMaxIterations = () => parseInt(process.env.MAX_AGENT_ITERATIONS || "8", 10);
 
 export async function chat(
   messages: Message[],
@@ -13,6 +13,7 @@ export async function chat(
   onToolActivity?: OnToolActivityCallback,
   onApprovalRequest?: ApprovalHandler
 ): Promise<string> {
+  const maxIterations = getMaxIterations();
   const conversation = [...messages];
   console.log("🤖 Llama 3.2 is thinking...");
   let response = await ollama.chat({
@@ -22,7 +23,7 @@ export async function chat(
   });
 
   for (let round = 0; response.message.tool_calls?.length; round += 1) {
-    if (round >= MAX_TOOL_ROUNDS) {
+    if (round >= maxIterations) {
       return "I stopped because the model requested too many consecutive tool calls.";
     }
     conversation.push(response.message);
@@ -90,5 +91,6 @@ export async function chat(
 
 export const ollamaModel: ModelClient = {
   name: "Llama 3.2",
+  provider: "llama",
   chat,
 };

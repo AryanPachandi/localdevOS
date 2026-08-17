@@ -1,4 +1,4 @@
-export type ModelMode = "auto" | "local" | "gemini";
+export type ModelMode = "auto" | "llama" | "gemini" | "gpt-oss" | "local";
 
 export interface LocalDevOSApi {
   getWorkspace: () => Promise<{ root: string; name: string }>;

@@ -14,7 +14,7 @@ export const App: React.FC = () => {
   });
   const [ollamaStatus, setOllamaStatus] = useState<"connected" | "starting" | "offline">("connected");
   const [modelMode, setModelMode] = useState<ModelMode>("auto");
-  const [isEscalated, setIsEscalated] = useState(false);
+  const [routingInfo, setRoutingInfo] = useState<{ model?: string; reason?: string } | null>(null);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activities, setActivities] = useState<ToolActivityItem[]>([]);
@@ -42,9 +42,18 @@ export const App: React.FC = () => {
 
       // Event Listeners
       window.localDevOS.onToolActivity((activity: ToolActivityItem) => {
-        if (activity.name === "model_router" && String(activity.result).includes("Escalating")) {
-          setIsEscalated(true);
+        if (activity.name === "model_router") {
+          const model = (activity.args?.model as string) || (activity.args?.fallbackModel as string);
+          const resultStr = String(activity.result || "");
+          let reason = "";
+
+          if (resultStr.includes("Reason: ")) {
+            reason = resultStr.split("Reason: ")[1].replace(")", "").trim();
+          }
+
+          setRoutingInfo({ model, reason });
         }
+
         setActivities((prev) => {
           const index = prev.findIndex((a) => a.id === activity.id);
           if (index >= 0) {
@@ -87,7 +96,6 @@ export const App: React.FC = () => {
 
     setMessages((prev) => [...prev, userMsg]);
     setIsThinking(true);
-    setIsEscalated(false);
     setActivities([]);
 
     try {
@@ -147,7 +155,7 @@ export const App: React.FC = () => {
   const handleNewChat = () => {
     setMessages([]);
     setActivities([]);
-    setIsEscalated(false);
+    setRoutingInfo(null);
   };
 
   const handleRespondApproval = async (id: string, approved: boolean) => {
@@ -176,7 +184,7 @@ export const App: React.FC = () => {
             status={ollamaStatus}
             selectedMode={modelMode}
             onSelectMode={setModelMode}
-            isEscalated={isEscalated}
+            routingInfo={routingInfo}
           />
         </header>
 

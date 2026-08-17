@@ -155,3 +155,29 @@ export async function searchFiles(
     return failure(error, "Unable to search the directory.");
   }
 }
+
+export async function writeFile(
+  workspace: Workspace,
+  filePath: string,
+  content: string
+): Promise<FilesystemResult<{ path: string; size: number }>> {
+  const resolved = await resolveWorkspacePath(workspace, filePath);
+  if (!resolved.ok) return resolved;
+
+  try {
+    const dir = path.dirname(resolved.data);
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(resolved.data, content, "utf8");
+    const stats = await fs.stat(resolved.data);
+    return {
+      ok: true,
+      data: {
+        path: displayWorkspacePath(workspace, resolved.data),
+        size: stats.size,
+      },
+    };
+  } catch (error) {
+    return failure(error, "Unable to write to file.");
+  }
+}
+

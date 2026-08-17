@@ -76,7 +76,8 @@ export async function chat(
     parts: [{ text: redactSecrets(m.content) }],
   }));
 
-  for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
+  const maxIterations = parseInt(process.env.MAX_AGENT_ITERATIONS || "8", 10);
+  for (let round = 0; round < maxIterations; round += 1) {
     try {
       const response = await ai.models.generateContent({
         model: modelName,
@@ -167,5 +168,6 @@ export async function chat(
 
 export const geminiModel: ModelClient = {
   name: "Gemini 3.5 Flash",
+  provider: "gemini",
   chat,
 };

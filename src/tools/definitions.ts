@@ -38,6 +38,27 @@ export const filesystemTools: Tool[] = [
   {
     type: "function",
     function: {
+      name: "write_file",
+      description: "Create or overwrite a file in the workspace with UTF-8 text content.",
+      parameters: {
+        type: "object",
+        properties: {
+          filePath: {
+            type: "string",
+            description: "Workspace-relative path of the file to write.",
+          },
+          content: {
+            type: "string",
+            description: "Text content to write to the file.",
+          },
+        },
+        required: ["filePath", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "search_files",
       description: "Recursively find literal text in workspace files. Generated and dependency directories are skipped unless explicitly searched.",
       parameters: {

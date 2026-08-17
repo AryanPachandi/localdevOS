@@ -5,19 +5,104 @@ interface StatusBadgeProps {
   status: "connected" | "starting" | "offline";
   selectedMode: ModelMode;
   onSelectMode: (mode: ModelMode) => void;
-  isEscalated?: boolean;
+  routingInfo?: {
+    model?: string;
+    reason?: string;
+  } | null;
 }
 
 export const StatusBadge: React.FC<StatusBadgeProps> = ({
   status,
   selectedMode,
   onSelectMode,
-  isEscalated,
+  routingInfo,
 }) => {
+  const getBadgeContent = () => {
+    if (selectedMode === "gpt-oss") {
+      return {
+        text: "⚡ GPT-OSS 120B · Ollama Cloud",
+        bg: "rgba(56, 189, 248, 0.15)",
+        color: "#38bdf8",
+        border: "rgba(56, 189, 248, 0.4)",
+      };
+    }
+    if (selectedMode === "gemini") {
+      return {
+        text: "⚡ Gemini · Cloud",
+        bg: "rgba(163, 113, 247, 0.15)",
+        color: "#a371f7",
+        border: "rgba(163, 113, 247, 0.4)",
+      };
+    }
+    if (selectedMode === "llama" || selectedMode === "local") {
+      return {
+        text: "● Llama 3.2 · Local",
+        bg: "rgba(63, 185, 80, 0.15)",
+        color: "#3fb950",
+        border: "rgba(63, 185, 80, 0.4)",
+      };
+    }
+
+    // Auto Mode: Display routed model & concise reason if available
+    if (routingInfo?.model) {
+      const modelLabel =
+        routingInfo.model === "gpt-oss"
+          ? "GPT-OSS 120B"
+          : routingInfo.model === "gemini"
+          ? "Gemini"
+          : "Llama 3.2";
+
+      const color =
+        routingInfo.model === "gpt-oss"
+          ? "#38bdf8"
+          : routingInfo.model === "gemini"
+          ? "#a371f7"
+          : "#3fb950";
+
+      const bg =
+        routingInfo.model === "gpt-oss"
+          ? "rgba(56, 189, 248, 0.15)"
+          : routingInfo.model === "gemini"
+          ? "rgba(163, 113, 247, 0.15)"
+          : "rgba(63, 185, 80, 0.15)";
+
+      const border =
+        routingInfo.model === "gpt-oss"
+          ? "rgba(56, 189, 248, 0.4)"
+          : routingInfo.model === "gemini"
+          ? "rgba(163, 113, 247, 0.4)"
+          : "rgba(63, 185, 80, 0.4)";
+
+      return {
+        text: `Auto → ${modelLabel}${routingInfo.reason ? ` (${routingInfo.reason})` : ""}`,
+        bg,
+        color,
+        border,
+      };
+    }
+
+    return {
+      text: "Auto Router (Ready)",
+      bg: "rgba(88, 166, 255, 0.15)",
+      color: "#58a6ff",
+      border: "rgba(88, 166, 255, 0.4)",
+    };
+  };
+
+  const badge = getBadgeContent();
+
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-      {/* Model Mode Selector */}
-      <div style={{ display: "flex", background: "#161b22", borderRadius: "6px", padding: "2px", border: "1px solid #30363d" }}>
+      {/* Model Selector Buttons */}
+      <div
+        style={{
+          display: "flex",
+          background: "#161b22",
+          borderRadius: "6px",
+          padding: "2px",
+          border: "1px solid #30363d",
+        }}
+      >
         <button
           type="button"
           onClick={() => onSelectMode("auto")}
@@ -26,7 +111,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
             color: selectedMode === "auto" ? "#58a6ff" : "#8b949e",
             border: "none",
             borderRadius: "4px",
-            padding: "4px 8px",
+            padding: "4px 10px",
             fontSize: "12px",
             fontWeight: selectedMode === "auto" ? 600 : 400,
             cursor: "pointer",
@@ -36,19 +121,19 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
         </button>
         <button
           type="button"
-          onClick={() => onSelectMode("local")}
+          onClick={() => onSelectMode("llama")}
           style={{
-            background: selectedMode === "local" ? "#21262d" : "transparent",
-            color: selectedMode === "local" ? "#3fb950" : "#8b949e",
+            background: selectedMode === "llama" || selectedMode === "local" ? "#21262d" : "transparent",
+            color: selectedMode === "llama" || selectedMode === "local" ? "#3fb950" : "#8b949e",
             border: "none",
             borderRadius: "4px",
-            padding: "4px 8px",
+            padding: "4px 10px",
             fontSize: "12px",
-            fontWeight: selectedMode === "local" ? 600 : 400,
+            fontWeight: selectedMode === "llama" || selectedMode === "local" ? 600 : 400,
             cursor: "pointer",
           }}
         >
-          Llama 3.2 (Local)
+          Llama 3.2 · Local
         </button>
         <button
           type="button"
@@ -58,17 +143,33 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
             color: selectedMode === "gemini" ? "#a371f7" : "#8b949e",
             border: "none",
             borderRadius: "4px",
-            padding: "4px 8px",
+            padding: "4px 10px",
             fontSize: "12px",
             fontWeight: selectedMode === "gemini" ? 600 : 400,
             cursor: "pointer",
           }}
         >
-          Gemini 3.5 Flash
+          Gemini · Cloud
+        </button>
+        <button
+          type="button"
+          onClick={() => onSelectMode("gpt-oss")}
+          style={{
+            background: selectedMode === "gpt-oss" ? "#21262d" : "transparent",
+            color: selectedMode === "gpt-oss" ? "#38bdf8" : "#8b949e",
+            border: "none",
+            borderRadius: "4px",
+            padding: "4px 10px",
+            fontSize: "12px",
+            fontWeight: selectedMode === "gpt-oss" ? 600 : 400,
+            cursor: "pointer",
+          }}
+        >
+          GPT-OSS 120B · Ollama Cloud
         </button>
       </div>
 
-      {/* Privacy Indicator Badge */}
+      {/* Model Active Status & Routing Reason Badge */}
       <div
         style={{
           display: "flex",
@@ -78,32 +179,12 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
           borderRadius: "12px",
           fontSize: "12px",
           fontWeight: 500,
-          background: isEscalated
-            ? "rgba(210, 153, 34, 0.15)"
-            : selectedMode === "gemini"
-            ? "rgba(163, 113, 247, 0.15)"
-            : "rgba(63, 185, 80, 0.15)",
-          color: isEscalated
-            ? "#d29922"
-            : selectedMode === "gemini"
-            ? "#a371f7"
-            : "#3fb950",
-          border: `1px solid ${
-            isEscalated
-              ? "rgba(210, 153, 34, 0.4)"
-              : selectedMode === "gemini"
-              ? "rgba(163, 113, 247, 0.4)"
-              : "rgba(63, 185, 80, 0.4)"
-          }`,
+          background: badge.bg,
+          color: badge.color,
+          border: `1px solid ${badge.border}`,
         }}
       >
-        {isEscalated ? (
-          <>⚡ Escalating to Gemini 3.5 Flash</>
-        ) : selectedMode === "gemini" ? (
-          <>☁ Gemini 3.5 Flash</>
-        ) : (
-          <>● Llama 3.2 • Local</>
-        )}
+        {badge.text}
       </div>
     </div>
   );
