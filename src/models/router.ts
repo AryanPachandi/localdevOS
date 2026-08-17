@@ -129,7 +129,7 @@ export function selectRoute(prompt: string, mode?: ModelMode): TaskRoute {
   if (gptOssPatterns.some((pattern) => lower.includes(pattern))) {
     return {
       complexity: "complex",
-      taskType: lower.includes("test") ? "testing" : lower.includes("review") ? "review" : "coding",
+      taskType: lower.includes("test") ? "testing" : lower.includes("review") ? "code_review" : "coding",
       model: "gpt-oss",
       reason: lower.includes("test")
         ? "code generation + testing"

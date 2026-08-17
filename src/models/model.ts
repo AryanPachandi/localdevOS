@@ -10,15 +10,18 @@ export type TaskComplexity = "simple" | "medium" | "complex";
 
 export type TaskType =
   | "filesystem"
-  | "git"
   | "shell"
+  | "git"
+  | "github"
   | "docker"
-  | "reasoning"
-  | "architecture"
-  | "debugging"
   | "coding"
+  | "code_review"
   | "testing"
-  | "review"
+  | "refactoring"
+  | "debugging"
+  | "architecture"
+  | "reasoning"
+  | "verification"
   | "deployment"
   | "general";
 
@@ -27,6 +30,25 @@ export interface TaskRoute {
   taskType: TaskType;
   model: ModelProvider;
   reason: string;
+}
+
+export interface PlanStep {
+  id: string;
+  type: TaskType;
+  model: ModelProvider | "verifier";
+  description: string;
+  status: "pending" | "ready" | "running" | "completed" | "failed" | "blocked" | "retrying" | "cancelled" | "awaiting_approval";
+  dependencies?: string[];
+  maxAttempts?: number;
+  result?: string;
+  error?: string;
+}
+
+export interface StructuredPlan {
+  goal: string;
+  workspacePath: string;
+  steps: PlanStep[];
+  taskPlan?: import("../orchestrator/types.js").TaskPlan;
 }
 
 export interface ToolActivityEvent {

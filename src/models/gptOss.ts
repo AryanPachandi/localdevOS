@@ -48,10 +48,7 @@ export async function chat(
     for (let round = 0; response.message.tool_calls?.length; round += 1) {
       if (round >= maxIterations) {
         console.warn("⚠️ GPT-OSS reached MAX_AGENT_ITERATIONS limit.");
-        return (
-          (response.message.content ? response.message.content + "\n\n" : "") +
-          `⚠️ Reached maximum iteration limit (${maxIterations}). Execution stopped.`
-        );
+        throw new Error(`GPT-OSS reached maximum iteration limit (${maxIterations}); task is incomplete.`);
       }
 
       conversation.push(response.message);

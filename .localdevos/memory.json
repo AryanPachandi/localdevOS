@@ -1,0 +1,16 @@
+{
+  "workspace": "/home/aryanpachandi/localdevos/.localdevos",
+  "entries": [
+    {
+      "id": "a872aaa9-a938-4b52-b5bf-b54079307ca4",
+      "type": "task",
+      "content": "push this code to github",
+      "createdAt": "2026-08-17T16:10:23.953Z",
+      "updatedAt": "2026-08-17T16:10:23.953Z",
+      "metadata": {
+        "projectType": "react",
+        "hasGit": "true"
+      }
+    }
+  ]
+}

@@ -52,6 +52,10 @@ export const App: React.FC = () => {
           }
 
           setRoutingInfo({ model, reason });
+        } else if (activity.name === "planner" && activity.args?.model) {
+          const model = activity.args.model as string;
+          const resultStr = String(activity.result || "");
+          setRoutingInfo({ model, reason: resultStr });
         }
 
         setActivities((prev) => {

@@ -34,6 +34,11 @@ export async function gitIsInitialized(workspace: Workspace): Promise<boolean> {
   return fs.existsSync(gitDir);
 }
 
+/** Returns the repository root reported by Git, never inferred from a parent .git directory. */
+export async function gitProjectRoot(workspace: Workspace): Promise<GitResult<string>> {
+  return runGitCommand(workspace, ["rev-parse", "--show-toplevel"]);
+}
+
 export async function gitInit(workspace: Workspace): Promise<GitResult<string>> {
   return runGitCommand(workspace, ["init"]);
 }

@@ -1,5 +1,5 @@
 import { listFiles, readFile, writeFile, searchFiles } from "../tools/filesystem.js";
-import { gitStatus, gitDiff, gitLog, gitInit, gitAdd, gitCommit, gitPush, gitRemote } from "../tools/git.js";
+import { gitStatus, gitDiff, gitLog, gitInit, gitAdd, gitCommit, gitPush, gitRemote, gitProjectRoot, gitStatusPorcelain, detectUnstagedSecrets } from "../tools/git.js";
 import { checkGitHubAuth, createGitHubRepository, deployToGitHub, pushExistingRepository } from "../tools/github.js";
 import { dockerPs, dockerComposeUp, dockerComposeBuild } from "../tools/docker.js";
 import { executeShellCommand } from "../tools/shell.js";
@@ -48,6 +48,8 @@ export async function executeTool(
       return searchFiles(workspace, directory, query);
     }
     case "deploy_to_github": {
+      const safe = await assertSafeGitWorkspace(workspace, true);
+      if (safe) return safe;
       const repoName = typeof args.repoName === "string" ? args.repoName : workspace.name;
       const isPrivate = typeof args.isPrivate === "boolean" ? args.isPrivate : true;
 
@@ -64,6 +66,8 @@ export async function executeTool(
       return deployToGitHub(workspace, { repoName, isPrivate });
     }
     case "push_existing_repository": {
+      const safe = await assertSafeGitWorkspace(workspace, true);
+      if (safe) return safe;
       const commitMessage = typeof args.commitMessage === "string" ? args.commitMessage : undefined;
 
       if (onApprovalRequest) {
@@ -109,20 +113,29 @@ export async function executeTool(
       return gitLog(workspace, maxCount);
     }
     case "git_init": {
+      // Initializing inside a parent repository would make the parent the Git root.
+      const root = await gitProjectRoot(workspace);
+      if (root.ok && root.data !== workspace.root) return gitSafetyError("Git root does not match the selected project root.");
       return gitInit(workspace);
     }
     case "git_add": {
       const pathSpec = typeof args.pathSpec === "string" ? args.pathSpec : ".";
+      const safe = await assertSafeGitWorkspace(workspace, false);
+      if (safe) return safe;
       return gitAdd(workspace, pathSpec);
     }
     case "git_commit": {
       const message = stringArgument(args, "message");
       if (typeof message !== "string") return message;
+      const safe = await assertSafeGitWorkspace(workspace, false);
+      if (safe) return safe;
       return gitCommit(workspace, message);
     }
     case "git_push": {
       const remote = typeof args.remote === "string" ? args.remote : "origin";
       const branch = typeof args.branch === "string" ? args.branch : undefined;
+      const safe = await assertSafeGitWorkspace(workspace, true);
+      if (safe) return safe;
 
       if (onApprovalRequest) {
         const approved = await onApprovalRequest({
@@ -176,4 +189,18 @@ export async function executeTool(
     default:
       return { ok: false, error: { message: `Unknown tool: ${name}`, code: "UNKNOWN_TOOL" } };
   }
+}
+
+function gitSafetyError(message: string): ToolError { return { ok: false, error: { message, code: "GIT_SAFETY_GATE" } }; }
+async function assertSafeGitWorkspace(workspace: Workspace, pushing: boolean): Promise<ToolError | undefined> {
+  const root = await gitProjectRoot(workspace);
+  if (!root.ok || root.data !== workspace.root) return gitSafetyError("Git root does not match the selected project root.");
+  const status = await gitStatusPorcelain(workspace);
+  if (!status.ok) return gitSafetyError(status.error.message);
+  if (!status.data.trim()) return gitSafetyError("Empty commit prevention: no project changes to stage or push.");
+  if (pushing) {
+    const secrets = await detectUnstagedSecrets(workspace);
+    if (secrets.hasSecrets) return { ok: false, error: { message: `Potential secrets require approval before push: ${secrets.secretFiles.join(", ")}`, code: "SECRETS_AWAITING_APPROVAL" } };
+  }
+  return undefined;
 }
