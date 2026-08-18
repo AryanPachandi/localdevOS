@@ -10,7 +10,7 @@ import { TaskGraph } from "./taskGraph.js";
 import { classifyFailure } from "./policies.js";
 import type { OrchestratorEvent, TaskPlan, TaskState, VerificationResult } from "./types.js";
 
-export interface OrchestratorOptions { clients?: Map<string, ModelClient>; execute?: typeof executeTool; verify?: (workspace: Workspace, goal: string, requireRemote?: boolean) => Promise<VerificationResult>; onEvent?: (event: OrchestratorEvent) => void; }
+export interface OrchestratorOptions { clients?: Map<string, ModelClient>; execute?: typeof executeTool; verify?: (workspace: Workspace, goal: string, requireRemote?: boolean, task?: TaskState, plan?: TaskPlan) => Promise<VerificationResult>; onEvent?: (event: OrchestratorEvent) => void; }
 const locks = new Set<string>();
 export class Orchestrator {
   private readonly clients; private readonly execute; private readonly verify;
@@ -56,9 +56,10 @@ export class Orchestrator {
     await this.runTask(task, plan, workspace, activity, approval);
   }
   private async executeTask(task: TaskState, plan: TaskPlan, workspace: Workspace, activity?: OnToolActivityCallback, approval?: ApprovalHandler): Promise<unknown> {
-    if (task.type === "verification") { this.emit(workspace, "verification_started", task); const result = await this.verify(workspace, plan.goal, task.description.includes("remote")); task.verification = result; this.emit(workspace, "verification_completed", task, result.summary); if (result.status !== "passed") throw new Error(result.summary); return result; }
-    if (task.type === "shell" || task.type === "testing") { const build = await this.execute("run_build", {}, workspace, approval); if (!isOk(build)) throw new Error(errorOf(build)); const tests = await this.execute("run_tests", {}, workspace, approval); if (!isOk(tests)) throw new Error(errorOf(tests)); return { build, tests }; }
+    if (task.type === "verification") { this.emit(workspace, "verification_started", task); const result = await this.verify(workspace, plan.goal, task.description.includes("remote"), task, plan); task.verification = result; this.emit(workspace, "verification_completed", task, result.summary); if (result.status === "failed") throw new Error(result.summary); return result; }
+    if (task.type === "testing") { const tests = await this.execute("run_tests", {}, workspace, approval); if (!isOk(tests)) throw new Error(errorOf(tests)); return { tests }; }
     if (task.type === "github" || task.type === "git") return this.runGitGate(task, workspace, approval);
+
     const client = this.clients.get(task.model ?? "llama"); if (!client) throw new Error(`No model configured for ${task.model}`); this.emit(workspace, "model_selected", task);
     const prompt = `Execution context: workspace=${workspace.root}; projectRoot=${workspace.root}; taskId=${task.id}; planId=${plan.id}.\nComplete only this task: ${task.description}\nGoal: ${plan.goal}\nUse tools where needed. Do not say completed unless the requested work is actually done. A model iteration limit is a failure.`;
     const output = await client.chat([{ role: "system", content: `All work must remain in ${workspace.root}.` } as Message, { role: "user", content: prompt }], filesystemTools, workspace, activity, approval);

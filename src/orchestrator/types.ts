@@ -4,8 +4,33 @@ export type TaskStatus = "pending" | "ready" | "running" | "completed" | "failed
 export type FailureKind = "transient" | "model_failure" | "tool_failure" | "code_failure" | "configuration" | "permission" | "security" | "workspace" | "user_input" | "unknown";
 
 export interface TaskError { message: string; kind: FailureKind; cause?: unknown; }
-export interface VerificationCheck { name: string; passed: boolean; required: boolean; detail: string; }
-export interface VerificationResult { status: "passed" | "failed" | "partial"; checks: VerificationCheck[]; summary: string; }
+export type VerificationStatus = "passed" | "failed" | "unverified" | "partial";
+
+export interface VerificationCheck {
+  name: string;
+  status?: "passed" | "failed" | "skipped";
+  details?: string;
+  passed: boolean;
+  required: boolean;
+  detail: string;
+}
+
+export interface VerificationResult {
+  status: VerificationStatus;
+  goalSatisfied?: boolean | null;
+  evidence?: string[];
+  checks: VerificationCheck[];
+  summary: string;
+}
+
+export interface ExecutionResult {
+  status: "completed" | "failed";
+  success: boolean;
+  outputs: unknown[];
+  errors: string[];
+  toolsUsed: string[];
+}
+
 export interface ExecutionContext { workspace: string; projectRoot: string; taskId: string; planId: string; }
 export interface TaskState {
   id: string; type: TaskType; description: string; model?: ModelProvider | "verifier";

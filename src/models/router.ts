@@ -5,13 +5,13 @@ import { geminiModel } from "./gemini.js";
 import { gptOssModel } from "./gptOss.js";
 import type { Workspace } from "../workspace/workspace.js";
 import type { ApprovalHandler } from "../agent/executor.js";
-import { recordTaskTelemetry } from "../telemetry/opik.js";
 
 export const modelRegistry = new Map<ModelProvider, ModelClient>([
   ["llama", ollamaModel],
   ["gemini", geminiModel],
   ["gpt-oss", gptOssModel],
 ]);
+
 
 export interface ModelRouterOptions {
   mode?: ModelMode;
@@ -121,16 +121,6 @@ export async function runWithRouter(
   }
 
   if (route.executionMode === "tool_first" || route.model === null) {
-    await recordTaskTelemetry({
-      taskType: route.taskType,
-      executionMode: route.executionMode,
-      selectedModel: null,
-      workspace: workspace.root,
-      toolCalls: route.tools,
-      iterations: route.maxIterations,
-      durationMs: Date.now() - startedAt,
-      success: true,
-    });
     return `Deterministic task classified as ${route.taskType}. Tool-first execution is required; no model call has been made.`;
   }
 
@@ -144,16 +134,6 @@ export async function runWithRouter(
 
   try {
     const result = await primaryClient.chat(initialMessages, tools, workspace, onToolActivity, onApprovalRequest);
-    await recordTaskTelemetry({
-      taskType: route.taskType,
-      executionMode: route.executionMode,
-      selectedModel: route.model,
-      workspace: workspace.root,
-      toolCalls: route.tools,
-      iterations: route.maxIterations,
-      durationMs: Date.now() - startedAt,
-      success: true,
-    });
     return result;
   } catch (primaryError) {
     const errorMsg = primaryError instanceof Error ? primaryError.message : String(primaryError);
@@ -176,44 +156,15 @@ export async function runWithRouter(
 
     try {
       const fallbackResult = await fallbackClient.chat([systemMsg, { role: "user", content: enrichedPrompt }], tools, workspace, onToolActivity, onApprovalRequest);
-      await recordTaskTelemetry({
-        taskType: route.taskType,
-        executionMode: route.executionMode,
-        selectedModel: fallbackProvider,
-        workspace: workspace.root,
-        toolCalls: route.tools,
-        iterations: route.maxIterations,
-        durationMs: Date.now() - startedAt,
-        success: true,
-      });
       return fallbackResult;
     } catch (fallbackError) {
       if (route.model !== "llama") {
         console.warn("⚠️ Fallback cloud model failed. Attempting final local fallback to Llama 3.2...");
         const finalResult = await ollamaModel.chat(initialMessages, tools, workspace, onToolActivity, onApprovalRequest);
-        await recordTaskTelemetry({
-          taskType: route.taskType,
-          executionMode: route.executionMode,
-          selectedModel: "llama",
-          workspace: workspace.root,
-          toolCalls: route.tools,
-          iterations: route.maxIterations,
-          durationMs: Date.now() - startedAt,
-          success: true,
-        });
         return finalResult;
       }
-      await recordTaskTelemetry({
-        taskType: route.taskType,
-        executionMode: route.executionMode,
-        selectedModel: route.model,
-        workspace: workspace.root,
-        toolCalls: route.tools,
-        iterations: route.maxIterations,
-        durationMs: Date.now() - startedAt,
-        success: false,
-      });
       throw fallbackError;
     }
   }
 }
+
