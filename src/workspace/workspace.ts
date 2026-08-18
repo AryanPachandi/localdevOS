@@ -116,14 +116,18 @@ export function detectWorkspaceContext(workspace: Workspace): WorkspaceContext {
   };
 }
 
-export function createWorkspace(root?: string): Workspace {
-  let targetPath = root && root.trim() ? root.trim() : process.cwd();
+export function createWorkspace(root?: string, userRoot = os.homedir()): Workspace {
+  if (!root?.trim()) throw new Error("No active workspace is selected.");
+  let targetPath = root.trim();
 
   if (targetPath.startsWith("~")) {
     targetPath = path.join(os.homedir(), targetPath.slice(1));
   }
 
   const absolutePath = path.resolve(targetPath);
+  const allowedRoot = fs.realpathSync(path.resolve(userRoot));
+  const relative = path.relative(allowedRoot, absolutePath);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error(`Workspace must remain inside the user root: ${allowedRoot}`);
 
   if (!fs.existsSync(absolutePath)) {
     throw new Error(`Workspace directory does not exist: ${absolutePath}`);

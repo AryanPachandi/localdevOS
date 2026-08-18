@@ -63,6 +63,60 @@ export async function listFiles(
   }
 }
 
+export async function listTree(
+  workspace: Workspace,
+  directory = ".",
+  maxDepth = 3
+): Promise<FilesystemResult<string>> {
+  const resolved = await resolveWorkspacePath(workspace, directory);
+  if (!resolved.ok) return resolved;
+
+  try {
+    const rootStats = await fs.stat(resolved.data);
+    if (!rootStats.isDirectory()) {
+      return { ok: false, error: { message: "The requested path is not a directory.", code: "NOT_A_DIRECTORY" } };
+    }
+
+    const lines: string[] = [path.basename(resolved.data) || workspace.name];
+    let rootLabel = path.basename(resolved.data) || workspace.name;
+    if (resolved.data === workspace.root) {
+      rootLabel = workspace.name;
+      lines[0] = `${workspace.name}/`;
+    }
+
+    const walk = async (currentPath: string, depth: number, prefix = ""): Promise<void> => {
+      if (depth > maxDepth) return;
+      const entries = await fs.readdir(currentPath, { withFileTypes: true });
+      const visibleEntries = entries
+        .filter((entry) => !SKIPPED_DIRECTORIES.has(entry.name) && !entry.name.startsWith("."))
+        .sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name));
+
+      for (let index = 0; index < visibleEntries.length; index += 1) {
+        const entry = visibleEntries[index];
+        if (!entry) continue;
+        const isLast = index === visibleEntries.length - 1;
+        const connector = isLast ? "└── " : "├── ";
+        const label = entry.isDirectory() ? `${entry.name}/` : entry.name;
+        lines.push(`${prefix}${connector}${label}`);
+
+        if (entry.isDirectory() && depth < maxDepth) {
+          const nextPrefix = `${prefix}${isLast ? "    " : "│   "}`;
+          await walk(path.join(currentPath, entry.name), depth + 1, nextPrefix);
+        }
+      }
+    };
+
+    await walk(resolved.data, 0, "");
+    if (lines.length === 1) {
+      const relativePath = path.relative(workspace.root, resolved.data);
+      return { ok: true, data: relativePath ? `${relativePath}/` : `${rootLabel}/` };
+    }
+    return { ok: true, data: `${rootLabel}/\n${lines.slice(1).join("\n")}` };
+  } catch (error) {
+    return failure(error, "Unable to list the project tree.");
+  }
+}
+
 export async function readFile(
   workspace: Workspace,
   filePath: string

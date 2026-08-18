@@ -21,6 +21,27 @@ export const filesystemTools: Tool[] = [
   {
     type: "function",
     function: {
+      name: "list_tree",
+      description: "Recursively display a directory tree within the current workspace. This is the source of truth for filesystem exploration and must not be invented by the model.",
+      parameters: {
+        type: "object",
+        properties: {
+          directory: {
+            type: "string",
+            description: "Workspace-relative directory to inspect, such as '.' or 'src'.",
+          },
+          maxDepth: {
+            type: "number",
+            description: "Maximum directory depth to traverse. Defaults to 3.",
+          },
+        },
+        required: ["directory"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "read_file",
       description: "Read a UTF-8 text file in the workspace and return its contents and metadata.",
       parameters: {

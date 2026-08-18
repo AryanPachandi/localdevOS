@@ -8,7 +8,19 @@ export type ModelMode = "auto" | "llama" | "gemini" | "gpt-oss" | "local";
 
 export type TaskComplexity = "simple" | "medium" | "complex";
 
+export type TaskCategory =
+  | "READ_FILESYSTEM"
+  | "WRITE_FILESYSTEM"
+  | "GIT"
+  | "DOCKER"
+  | "TESTING"
+  | "CODING"
+  | "REASONING"
+  | "RESEARCH"
+  | "GENERAL";
+
 export type TaskType =
+  | TaskCategory
   | "filesystem"
   | "shell"
   | "git"
@@ -25,10 +37,25 @@ export type TaskType =
   | "deployment"
   | "general";
 
-export interface TaskRoute {
+export type ExecutionMode = "tool_first" | "agent";
+
+export interface TaskClassification {
+  taskType: TaskCategory;
   complexity: TaskComplexity;
-  taskType: TaskType;
-  model: ModelProvider;
+  executionMode: ExecutionMode;
+  model: ModelProvider | null;
+  tools: string[];
+  maxIterations: number;
+  reason: string;
+}
+
+export interface TaskRoute {
+  taskType: TaskCategory | TaskType;
+  complexity: TaskComplexity;
+  executionMode: ExecutionMode;
+  model: ModelProvider | null;
+  tools: string[];
+  maxIterations: number;
   reason: string;
 }
 

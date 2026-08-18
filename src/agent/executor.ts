@@ -1,4 +1,4 @@
-import { listFiles, readFile, writeFile, searchFiles } from "../tools/filesystem.js";
+import { listFiles, listTree, readFile, writeFile, searchFiles } from "../tools/filesystem.js";
 import { gitStatus, gitDiff, gitLog, gitInit, gitAdd, gitCommit, gitPush, gitRemote, gitProjectRoot, gitStatusPorcelain, detectUnstagedSecrets } from "../tools/git.js";
 import { checkGitHubAuth, createGitHubRepository, deployToGitHub, pushExistingRepository } from "../tools/github.js";
 import { dockerPs, dockerComposeUp, dockerComposeBuild } from "../tools/docker.js";
@@ -29,6 +29,12 @@ export async function executeTool(
       const directory = args.directory ? stringArgument(args, "directory") : ".";
       if (typeof directory !== "string") return directory;
       return listFiles(workspace, directory);
+    }
+    case "list_tree": {
+      const directory = args.directory ? stringArgument(args, "directory") : ".";
+      const maxDepth = typeof args.maxDepth === "number" ? args.maxDepth : 3;
+      if (typeof directory !== "string") return directory;
+      return listTree(workspace, directory, maxDepth);
     }
     case "read_file": {
       const filePath = stringArgument(args, "filePath");

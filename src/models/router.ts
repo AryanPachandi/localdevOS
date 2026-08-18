@@ -1,10 +1,11 @@
 import type { Message, Tool } from "ollama";
-import type { ModelMode, ModelProvider, TaskRoute, ModelClient, OnToolActivityCallback } from "./model.js";
+import type { ModelMode, ModelProvider, TaskRoute, ModelClient, OnToolActivityCallback, TaskClassification, TaskCategory } from "./model.js";
 import { ollamaModel } from "./ollama.js";
 import { geminiModel } from "./gemini.js";
 import { gptOssModel } from "./gptOss.js";
 import type { Workspace } from "../workspace/workspace.js";
 import type { ApprovalHandler } from "../agent/executor.js";
+import { recordTaskTelemetry } from "../telemetry/opik.js";
 
 export const modelRegistry = new Map<ModelProvider, ModelClient>([
   ["llama", ollamaModel],
@@ -17,186 +18,83 @@ export interface ModelRouterOptions {
   maxLocalAttempts?: number;
 }
 
+const TASK_ROUTING: Record<
+  TaskCategory,
+  {
+    complexity: TaskRoute["complexity"];
+    model: ModelProvider | null;
+    tools: string[];
+    executionMode: TaskRoute["executionMode"];
+    maxIterations: number;
+    reason: string;
+  }
+> = {
+  READ_FILESYSTEM: { complexity: "simple", model: null, tools: ["list_files", "list_tree", "read_file"], executionMode: "tool_first", maxIterations: 1, reason: "Filesystem inspection is deterministic and should be handled with tools first." },
+  WRITE_FILESYSTEM: { complexity: "simple", model: null, tools: ["write_file"], executionMode: "tool_first", maxIterations: 1, reason: "Direct filesystem writes are deterministic and do not need a coding model." },
+  GIT: { complexity: "simple", model: null, tools: ["git_status"], executionMode: "tool_first", maxIterations: 2, reason: "Git status and diff are direct tool operations; only explain if needed." },
+  DOCKER: { complexity: "simple", model: null, tools: ["docker_ps"], executionMode: "tool_first", maxIterations: 3, reason: "Container inspection is deterministic and tool-driven." },
+  TESTING: { complexity: "simple", model: null, tools: ["run_tests"], executionMode: "tool_first", maxIterations: 5, reason: "Testing should run with built-in test tooling before any model is considered." },
+  CODING: { complexity: "complex", model: "gpt-oss", tools: ["write_file", "read_file"], executionMode: "agent", maxIterations: 12, reason: "Coding is best handled by GPT-OSS unless the task is simple enough to route elsewhere." },
+  REASONING: { complexity: "complex", model: "gemini", tools: ["search_files"], executionMode: "agent", maxIterations: 10, reason: "Complex multi-step reasoning should be routed to Gemini." },
+  RESEARCH: { complexity: "medium", model: "llama", tools: ["search_files"], executionMode: "agent", maxIterations: 5, reason: "Research can use a light local model when it requires synthesis." },
+  GENERAL: { complexity: "simple", model: "llama", tools: [], executionMode: "agent", maxIterations: 8, reason: "General small questions can use the local model." },
+};
+
+export function classifyTask(prompt: string): TaskClassification {
+  const lower = prompt.toLowerCase();
+
+  if (/\b(git status|git diff|git log|show my git|show git|status of .*git|git of)\b/.test(lower)) {
+    return { ...TASK_ROUTING.GIT, taskType: "GIT" };
+  }
+
+  if (/\b(show|list|explore|find|what files|what are the files|project tree|tree|directory|src|package\.json|read package|read file|all files|show me files)\b/.test(lower)) {
+    return { ...TASK_ROUTING.READ_FILESYSTEM, taskType: "READ_FILESYSTEM" };
+  }
+
+  if (/\b(docker|containers are running|what containers|docker ps|compose up|docker compose)\b/.test(lower)) {
+    return { ...TASK_ROUTING.DOCKER, taskType: "DOCKER" };
+  }
+
+  if (/\b(run tests|test suite|npm test|vitest|jest|run the tests|execute tests|pytest|cargo test)\b/.test(lower)) {
+    return { ...TASK_ROUTING.TESTING, taskType: "TESTING" };
+  }
+
+  if (/\b(create a .*project|create .*project|scaffold|next\.js|nextjs|react app|fix this .*bug|fix .*typescript bug|write code|implement feature|write tests|modify code|create .* app|create .*website)\b/.test(lower)) {
+    return { ...TASK_ROUTING.CODING, taskType: "CODING" };
+  }
+
+  if (/\b(design .*architecture|architectural|scalable architecture|root cause|why is .* crashing|why is .* failing|analyze .*codebase|analyze architecture|complex reasoning)\b/.test(lower)) {
+    return { ...TASK_ROUTING.REASONING, taskType: "REASONING" };
+  }
+
+  if (/\b(search|research|compare|find docs|summarize|look up)\b/.test(lower)) {
+    return { ...TASK_ROUTING.RESEARCH, taskType: "RESEARCH" };
+  }
+
+  if (/\b(write .*file|create .*file|delete .*file|rename .*file|update .*file)\b/.test(lower)) {
+    return { ...TASK_ROUTING.WRITE_FILESYSTEM, taskType: "WRITE_FILESYSTEM" };
+  }
+
+  return { ...TASK_ROUTING.GENERAL, taskType: "GENERAL" };
+}
+
 export function selectRoute(prompt: string, mode?: ModelMode): TaskRoute {
   const selectedMode = mode || (process.env.MODEL_ROUTING as ModelMode) || "auto";
 
-  // Manual Mode Overrides
   if (selectedMode === "llama" || selectedMode === "local") {
-    return {
-      complexity: "simple",
-      taskType: "general",
-      model: "llama",
-      reason: "Manual selection: Llama 3.2 (Local)",
-    };
+    return { ...TASK_ROUTING.GENERAL, taskType: "GENERAL", model: "llama", reason: "Manual selection: Llama 3.2 (Local)" };
   }
 
   if (selectedMode === "gemini") {
-    return {
-      complexity: "complex",
-      taskType: "reasoning",
-      model: "gemini",
-      reason: "Manual selection: Gemini 3.5 Flash (Cloud)",
-    };
+    return { ...TASK_ROUTING.REASONING, taskType: "REASONING", model: "gemini", reason: "Manual selection: Gemini 3.5 Flash (Cloud)" };
   }
 
   if (selectedMode === "gpt-oss") {
-    return {
-      complexity: "complex",
-      taskType: "coding",
-      model: "gpt-oss",
-      reason: "Manual selection: GPT-OSS 120B Cloud",
-    };
+    return { ...TASK_ROUTING.CODING, taskType: "CODING", model: "gpt-oss", reason: "Manual selection: GPT-OSS 120B Cloud" };
   }
 
-  // AUTO Mode: Deterministic classification based on prompt requirements
-  const lower = prompt.toLowerCase();
-
-  // 1. Explicit user model requests
-  if (
-    lower.includes("use gpt-oss") ||
-    lower.includes("use gpt oss") ||
-    lower.includes("gpt-oss") ||
-    lower.includes("gpt oss") ||
-    lower.includes("120b")
-  ) {
-    return {
-      complexity: "complex",
-      taskType: "coding",
-      model: "gpt-oss",
-      reason: "User explicitly requested GPT-OSS 120B Cloud",
-    };
-  }
-
-  if (lower.includes("use gemini") || lower.includes("gemini 3.5") || lower.includes("escalate to gemini")) {
-    return {
-      complexity: "complex",
-      taskType: "reasoning",
-      model: "gemini",
-      reason: "User explicitly requested Gemini 3.5 Flash",
-    };
-  }
-
-  if (lower.includes("use llama") || lower.includes("llama 3.2") || lower.includes("use local model")) {
-    return {
-      complexity: "simple",
-      taskType: "general",
-      model: "llama",
-      reason: "User explicitly requested Llama 3.2 (Local)",
-    };
-  }
-
-  // 2. GPT-OSS 120B Cloud Triggers: Coding, Code Review, Testing, Refactoring & Implementation
-  const gptOssPatterns = [
-    // Tests & Test generation
-    "write test",
-    "write tests",
-    "generate test",
-    "create test",
-    "test cases",
-    "write unit test",
-    "run tests and fix",
-    "fix failures",
-    "test generation",
-    // Code Review & Diff Audit
-    "review my changes",
-    "code review",
-    "review this code",
-    "review git diff",
-    "review my git diff",
-    "review my",
-    "review",
-    "find bugs",
-    "security review",
-    "performance review",
-    "security issues",
-    // Implementation & Refactoring
-    "refactor",
-    "implement feature",
-    "implement jwt",
-    "implement authentication",
-    "implement",
-    "implementation changes",
-    "modify source files",
-    "write code",
-    "fix typescript error",
-    "fix bug and run",
-    "fix code",
-    "fix implementation",
-    "add feature",
-    "multi-file",
-  ];
-
-  if (gptOssPatterns.some((pattern) => lower.includes(pattern))) {
-    return {
-      complexity: "complex",
-      taskType: lower.includes("test") ? "testing" : lower.includes("review") ? "code_review" : "coding",
-      model: "gpt-oss",
-      reason: lower.includes("test")
-        ? "code generation + testing"
-        : lower.includes("review")
-        ? "code review & audit"
-        : "software engineering & refactoring",
-    };
-  }
-
-  // 3. Gemini 3.5 Flash Triggers: Complex Reasoning, Architecture, Deep Debugging
-  const geminiPatterns = [
-    "why is my application crashing",
-    "why is app crashing",
-    "why is authentication failing",
-    "why is",
-    "root cause",
-    "concurrency bug",
-    "race condition",
-    "memory leak",
-    "deep debugging",
-    "debug",
-    "analyze architecture",
-    "architecture of this application",
-    "design a better architecture",
-    "design architecture",
-    "architecture",
-    "analyze",
-    "architectural tradeoffs",
-    "difficult production issue",
-    "analyze this large codebase",
-    "components interact",
-    "complex deployment planning",
-  ];
-
-  if (geminiPatterns.some((pattern) => lower.includes(pattern))) {
-    return {
-      complexity: "complex",
-      taskType: lower.includes("architecture") || lower.includes("analyze")
-        ? "architecture"
-        : lower.includes("debug") || lower.includes("crash") || lower.includes("root cause")
-        ? "debugging"
-        : "reasoning",
-      model: "gemini",
-      reason: lower.includes("architecture") || lower.includes("analyze")
-        ? "architectural analysis"
-        : lower.includes("root cause") || lower.includes("crash")
-        ? "complex root-cause debugging"
-        : "complex multi-step reasoning",
-    };
-  }
-
-  // 4. Default: Llama 3.2 Local General Agent
-  let defaultTaskType: TaskRoute["taskType"] = "general";
-  if (lower.includes("file") || lower.includes("directory") || lower.includes("src") || lower.includes("package.json")) {
-    defaultTaskType = "filesystem";
-  } else if (lower.includes("git status") || lower.includes("git diff") || lower.includes("git log")) {
-    defaultTaskType = "git";
-  } else if (lower.includes("docker")) {
-    defaultTaskType = "docker";
-  }
-
-  return {
-    complexity: "simple",
-    taskType: defaultTaskType,
-    model: "llama",
-    reason: "fast local deterministic query",
-  };
+  const classification = classifyTask(prompt);
+  return { ...classification, taskType: classification.taskType, model: classification.model, reason: classification.reason };
 }
 
 export async function runWithRouter(
@@ -207,19 +105,33 @@ export async function runWithRouter(
   onToolActivity?: OnToolActivityCallback,
   onApprovalRequest?: ApprovalHandler
 ): Promise<string> {
+  const startedAt = Date.now();
   const route = selectRoute(prompt, options.mode);
-  console.log(`🧭 Router Selected: ${route.model.toUpperCase()} [Task: ${route.taskType}, Reason: ${route.reason}]`);
+  console.log(`🧭 Router Selected: ${route.model ? route.model.toUpperCase() : "TOOL-FIRST"} [Task: ${route.taskType}, Reason: ${route.reason}]`);
 
-  // Report initial routing decisions to UI
   if (onToolActivity) {
     onToolActivity({
       id: `route_${Date.now()}`,
       name: "model_router",
-      args: { model: route.model, complexity: route.complexity, taskType: route.taskType },
+      args: { model: route.model, complexity: route.complexity, taskType: route.taskType, executionMode: route.executionMode },
       status: "completed",
-      result: `Auto → ${route.model === "gpt-oss" ? "GPT-OSS 120B" : route.model === "gemini" ? "Gemini 3.5 Flash" : "Llama 3.2"} (Reason: ${route.reason})`,
+      result: route.model ? `Auto → ${route.model === "gpt-oss" ? "GPT-OSS 120B" : route.model === "gemini" ? "Gemini 3.5 Flash" : "Llama 3.2"} (Reason: ${route.reason})` : `Tool-first route: ${route.taskType} (Reason: ${route.reason})`,
       timestamp: Date.now(),
     });
+  }
+
+  if (route.executionMode === "tool_first" || route.model === null) {
+    await recordTaskTelemetry({
+      taskType: route.taskType,
+      executionMode: route.executionMode,
+      selectedModel: null,
+      workspace: workspace.root,
+      toolCalls: route.tools,
+      iterations: route.maxIterations,
+      durationMs: Date.now() - startedAt,
+      success: true,
+    });
+    return `Deterministic task classified as ${route.taskType}. Tool-first execution is required; no model call has been made.`;
   }
 
   const systemMsg: Message = {
@@ -228,33 +140,33 @@ export async function runWithRouter(
   };
 
   const initialMessages: Message[] = [systemMsg, { role: "user", content: prompt }];
-
-  // Attempt execution with primary routed model
   const primaryClient = modelRegistry.get(route.model) || ollamaModel;
 
   try {
-    return await primaryClient.chat(initialMessages, tools, workspace, onToolActivity, onApprovalRequest);
+    const result = await primaryClient.chat(initialMessages, tools, workspace, onToolActivity, onApprovalRequest);
+    await recordTaskTelemetry({
+      taskType: route.taskType,
+      executionMode: route.executionMode,
+      selectedModel: route.model,
+      workspace: workspace.root,
+      toolCalls: route.tools,
+      iterations: route.maxIterations,
+      durationMs: Date.now() - startedAt,
+      success: true,
+    });
+    return result;
   } catch (primaryError) {
     const errorMsg = primaryError instanceof Error ? primaryError.message : String(primaryError);
     console.warn(`⚠️ Model ${route.model} failed (${errorMsg}). Initiating fallback...`);
 
-    // Determine fallback target model
-    let fallbackProvider: ModelProvider;
-    if (route.model === "gpt-oss") {
-      fallbackProvider = "gemini";
-    } else if (route.model === "gemini") {
-      fallbackProvider = "gpt-oss";
-    } else {
-      fallbackProvider = "gemini";
-    }
-
+    const fallbackProvider = route.model === "gpt-oss" ? "gemini" : route.model === "gemini" ? "gpt-oss" : "gemini";
     if (onToolActivity) {
       onToolActivity({
         id: `fallback_${Date.now()}`,
         name: "model_router",
         args: { failedModel: route.model, fallbackModel: fallbackProvider, error: errorMsg },
         status: "completed",
-        result: `⚡ ${route.model} unavailable. Falling back to ${fallbackProvider === "gpt-oss" ? "GPT-OSS 120B" : fallbackProvider === "gemini" ? "Gemini 3.5 Flash" : "Llama 3.2"}`,
+        result: `⚡ ${route.model} unavailable. Falling back to ${fallbackProvider === "gpt-oss" ? "GPT-OSS 120B" : "Gemini 3.5 Flash"}`,
         timestamp: Date.now(),
       });
     }
@@ -263,19 +175,44 @@ export async function runWithRouter(
     const enrichedPrompt = `Original Task: ${prompt}\n\nNote: Primary model (${route.model}) experienced an error: ${errorMsg}\n\nPlease take over and complete the task.`;
 
     try {
-      return await fallbackClient.chat(
-        [systemMsg, { role: "user", content: enrichedPrompt }],
-        tools,
-        workspace,
-        onToolActivity,
-        onApprovalRequest
-      );
+      const fallbackResult = await fallbackClient.chat([systemMsg, { role: "user", content: enrichedPrompt }], tools, workspace, onToolActivity, onApprovalRequest);
+      await recordTaskTelemetry({
+        taskType: route.taskType,
+        executionMode: route.executionMode,
+        selectedModel: fallbackProvider,
+        workspace: workspace.root,
+        toolCalls: route.tools,
+        iterations: route.maxIterations,
+        durationMs: Date.now() - startedAt,
+        success: true,
+      });
+      return fallbackResult;
     } catch (fallbackError) {
-      // Final fallback to Llama 3.2 if initial primary/fallback was cloud
       if (route.model !== "llama") {
         console.warn("⚠️ Fallback cloud model failed. Attempting final local fallback to Llama 3.2...");
-        return ollamaModel.chat(initialMessages, tools, workspace, onToolActivity, onApprovalRequest);
+        const finalResult = await ollamaModel.chat(initialMessages, tools, workspace, onToolActivity, onApprovalRequest);
+        await recordTaskTelemetry({
+          taskType: route.taskType,
+          executionMode: route.executionMode,
+          selectedModel: "llama",
+          workspace: workspace.root,
+          toolCalls: route.tools,
+          iterations: route.maxIterations,
+          durationMs: Date.now() - startedAt,
+          success: true,
+        });
+        return finalResult;
       }
+      await recordTaskTelemetry({
+        taskType: route.taskType,
+        executionMode: route.executionMode,
+        selectedModel: route.model,
+        workspace: workspace.root,
+        toolCalls: route.tools,
+        iterations: route.maxIterations,
+        durationMs: Date.now() - startedAt,
+        success: false,
+      });
       throw fallbackError;
     }
   }

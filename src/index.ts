@@ -1,7 +1,8 @@
 import { runAgent } from "./agent/agent.js";
 import { createInterface } from "node:readline/promises";
 import { speechToText } from "./speech/speechToText.js";
-import { createWorkspace, type Workspace } from "./workspace/workspace.js";
+import type { Workspace } from "./workspace/workspace.js";
+import { WorkspaceManager } from "./workspace/workspaceManager.js";
 import "dotenv/config";
 
 function parseCliArgs(args: string[]): { projectPath?: string; prompt?: string } {
@@ -94,18 +95,19 @@ async function startInteractiveCli(workspace: Workspace): Promise<void> {
 
 async function main(): Promise<void> {
   const { projectPath, prompt } = parseCliArgs(process.argv.slice(2));
-
-  let workspace: Workspace;
-  try {
-    workspace = createWorkspace(projectPath);
-  } catch (error) {
-    console.error(`⚠️ ${(error as Error).message}`);
-    process.exit(1);
-  }
+  const manager = new WorkspaceManager();
+  let workspace: Workspace | null = null;
+  try { if (projectPath) workspace = manager.setActiveWorkspace(projectPath, "manual"); } catch (error) { console.error(`⚠️ ${(error as Error).message}`); process.exit(1); }
 
   if (prompt) {
+    if (!workspace) {
+      const resolution = manager.resolve(prompt);
+      if (resolution.kind !== "resolved" || !resolution.workspace) { console.error(`⚠️ ${resolution.message ?? "No active workspace is selected."}`); return; }
+      workspace = resolution.workspace;
+    }
     await handlePrompt(prompt, workspace);
   } else {
+    if (!workspace) { console.log(`\nScope: ${manager.userRoot}\nApplication: ${manager.applicationRoot}\nWorkspace: No project selected\nUse --project <path> or enter a task that identifies a project.\n`); return; }
     await startInteractiveCli(workspace);
   }
 }

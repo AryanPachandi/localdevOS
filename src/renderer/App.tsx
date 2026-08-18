@@ -12,6 +12,7 @@ export const App: React.FC = () => {
     root: "",
     name: "",
   });
+  const [scope, setScope] = useState<{ userRoot: string; applicationRoot: string; activeWorkspace: string | null; source: string }>({ userRoot: "", applicationRoot: "", activeWorkspace: null, source: "default" });
   const [ollamaStatus, setOllamaStatus] = useState<"connected" | "starting" | "offline">("connected");
   const [modelMode, setModelMode] = useState<ModelMode>("auto");
   const [routingInfo, setRoutingInfo] = useState<{ model?: string; reason?: string } | null>(null);
@@ -32,8 +33,9 @@ export const App: React.FC = () => {
   // Initialize workspace & status
   useEffect(() => {
     if (window.localDevOS) {
-      window.localDevOS.getWorkspace().then((ws) => {
-        if (ws) setWorkspace(ws);
+      window.localDevOS.getFilesystemScope().then((nextScope) => {
+        setScope(nextScope);
+        if (nextScope.activeWorkspace) setWorkspace({ root: nextScope.activeWorkspace, name: nextScope.workspaceName ?? "" });
       });
 
       window.localDevOS.checkOllamaStatus().then((res) => {
@@ -75,6 +77,10 @@ export const App: React.FC = () => {
 
       window.localDevOS.onApprovalRequest((req) => {
         setApprovalRequest(req);
+      });
+      window.localDevOS.onWorkspaceChanged((nextScope) => {
+        setScope(nextScope);
+        setWorkspace(nextScope.activeWorkspace ? { root: nextScope.activeWorkspace, name: nextScope.workspaceName ?? "" } : { root: "", name: "" });
       });
     }
   }, []);
@@ -181,7 +187,9 @@ export const App: React.FC = () => {
       <main className="main-content">
         <header className="top-header">
           <WorkspaceBar
+            userRoot={scope.userRoot}
             workspacePath={workspace.root}
+            workspaceSource={scope.source}
             onChangeWorkspace={handleChangeWorkspace}
           />
           <StatusBadge

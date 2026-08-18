@@ -4,12 +4,17 @@ console.log("[LocalDevOS] Preload script loading...");
 
 const api = {
   getWorkspace: () => ipcRenderer.invoke("get-workspace"),
+  getFilesystemScope: () => ipcRenderer.invoke("get-filesystem-scope"),
+  getActiveWorkspace: () => ipcRenderer.invoke("get-active-workspace"),
   selectWorkspace: () => ipcRenderer.invoke("select-workspace"),
   checkOllamaStatus: () => ipcRenderer.invoke("check-ollama-status"),
   sendMessage: (prompt: string, mode?: string) => ipcRenderer.invoke("send-message", prompt, mode),
   startVoiceInput: () => ipcRenderer.invoke("start-voice-input"),
   onToolActivity: (callback: (activity: any) => void) => {
     ipcRenderer.on("tool-activity", (_event: any, data: any) => callback(data));
+  },
+  onWorkspaceChanged: (callback: (scope: any) => void) => {
+    ipcRenderer.on("workspace-changed", (_event: any, data: any) => callback(data));
   },
   onVoiceStatus: (callback: (status: "listening" | "transcribing" | "idle") => void) => {
     ipcRenderer.on("voice-status", (_event: any, data: any) => callback(data));

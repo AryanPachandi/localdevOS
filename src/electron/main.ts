@@ -5,7 +5,8 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import http from "node:http";
-import { createWorkspace, type Workspace } from "../workspace/workspace.js";
+import type { Workspace } from "../workspace/workspace.js";
+import { WorkspaceManager } from "../workspace/workspaceManager.js";
 import { runAgent } from "../agent/agent.js";
 import { speechToText } from "../speech/speechToText.js";
 import type { ModelMode } from "../models/model.js";
@@ -15,13 +16,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let mainWindow: BrowserWindowType | null = null;
-let currentWorkspace: Workspace;
-
-try {
-  currentWorkspace = createWorkspace();
-} catch {
-  currentWorkspace = { root: process.cwd(), name: path.basename(process.cwd()) };
-}
+const workspaceManager = new WorkspaceManager();
 
 const pendingApprovals = new Map<string, (approved: boolean) => void>();
 
@@ -105,13 +100,15 @@ app.on("window-all-closed", () => {
 });
 
 // IPC Handlers
-ipcMain.handle("get-workspace", () => {
-  console.log("📡 IPC: get-workspace returning", currentWorkspace);
-  return currentWorkspace;
-});
+workspaceManager.onChange((scope) => mainWindow?.webContents.send("workspace-changed", scope));
+ipcMain.handle("get-filesystem-scope", () => workspaceManager.getScope());
+ipcMain.handle("get-active-workspace", () => workspaceManager.getActiveWorkspace());
+// Kept temporarily for older renderers; it deliberately returns null on startup.
+ipcMain.handle("get-workspace", () => workspaceManager.getActiveWorkspace());
+ipcMain.handle("set-active-workspace", (_event, target: string) => workspaceManager.setActiveWorkspace(target, "manual"));
 
 ipcMain.handle("select-workspace", async () => {
-  if (!mainWindow) return currentWorkspace;
+  if (!mainWindow) return workspaceManager.getActiveWorkspace();
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ["openDirectory"],
     title: "Select Project Workspace",
@@ -119,16 +116,18 @@ ipcMain.handle("select-workspace", async () => {
 
   if (!result.canceled && result.filePaths[0]) {
     try {
-      currentWorkspace = createWorkspace(result.filePaths[0]);
-      console.log("📂 IPC: Workspace updated to", currentWorkspace);
-      return currentWorkspace;
+      const workspace = workspaceManager.setActiveWorkspace(result.filePaths[0], "manual");
+      console.log("📂 IPC: Workspace updated to", workspace);
+      return workspace;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Invalid directory.";
       dialog.showErrorBox("Workspace Selection Error", message);
     }
   }
-  return currentWorkspace;
+  return workspaceManager.getActiveWorkspace();
 });
+
+ipcMain.handle("resolve-workspace", (_event, prompt: string) => workspaceManager.resolve(prompt));
 
 ipcMain.handle("check-ollama-status", async () => {
   return checkOllamaConnection();
@@ -140,12 +139,26 @@ ipcMain.handle("send-message", async (_event, prompt: string, mode?: ModelMode) 
   }
 
   const modelMode: ModelMode = mode || "auto";
-  console.log(`💬 IPC: send-message [Mode: ${modelMode}] in workspace [${currentWorkspace.root}]: "${prompt}"`);
+  const resolution = workspaceManager.resolve(prompt);
+  if (resolution.kind === "ambiguous") return { ok: false, error: `${resolution.message}\n${resolution.candidates?.map((candidate, index) => `${index + 1}. ${candidate}`).join("\n")}` };
+  if (resolution.kind !== "resolved" || !resolution.workspace) return { ok: false, error: resolution.message ?? "No active workspace is selected." };
+  const taskWorkspace: Workspace = resolution.workspace;
+  if (mainWindow) {
+    mainWindow.webContents.send("tool-activity", {
+      id: `workspace_resolution_${Date.now()}`,
+      name: "workspace_resolver",
+      args: { userRoot: workspaceManager.userRoot, source: resolution.source },
+      status: "completed",
+      result: `📁 Workspace Resolution\nScope: ${workspaceManager.userRoot}\nResolved workspace: ${taskWorkspace.root}${resolution.source === "created" ? `\n📁 Creating project directory\n✓ ${taskWorkspace.root}` : ""}`,
+      timestamp: Date.now(),
+    });
+  }
+  console.log(`💬 IPC: send-message [Mode: ${modelMode}] in workspace [${taskWorkspace.root}]: "${prompt}"`);
 
   try {
     const response = await runAgent(
       prompt,
-      currentWorkspace,
+      taskWorkspace,
       modelMode,
       (activity) => {
         if (mainWindow) {
